@@ -1,12 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Copyright (C) 2018 the original author or authors.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -37,13 +36,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import javax.annotation.PostConstruct;
 
 import org.apache.dubbo.common.URL;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.SmartInitializingSingleton;
@@ -51,6 +50,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
+import org.springframework.cloud.client.loadbalancer.LoadBalancerClient;
 import org.springframework.cloud.commons.util.InetUtils;
 import org.springframework.context.ApplicationEvent;
 import org.springframework.context.ApplicationEventPublisher;
@@ -70,6 +70,7 @@ import com.alibaba.cloud.dubbo.service.DubboMetadataService;
 import com.alibaba.cloud.dubbo.service.DubboMetadataServiceExporter;
 import com.alibaba.cloud.dubbo.service.DubboMetadataServiceProxy;
 import com.alibaba.cloud.dubbo.util.JSONUtils;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.type.TypeFactory;
 
@@ -165,6 +166,9 @@ public class DubboServiceMetadataRepository
 
 	@Autowired
 	private DiscoveryClient discoveryClient;
+
+	@Autowired
+	private LoadBalancerClient loadBalancerClient;
 
 	@Autowired
 	private JSONUtils jsonUtils;
@@ -288,6 +292,16 @@ public class DubboServiceMetadataRepository
 				// mark this service name having been initialized
 				initializedServices.add(serviceName);
 			}
+		}
+	}
+
+	/**
+	 * Remove the metadata of Dubbo Services if no there is no service instance
+	 * @param serviceName the service name
+	 */
+	public void removeInitializedService(String serviceName) {
+		synchronized (monitor) {
+			initializedServices.remove(serviceName);
 		}
 	}
 
@@ -565,7 +579,7 @@ public class DubboServiceMetadataRepository
 		if (object == null) {
 			if (logger.isWarnEnabled()) {
 				logger.warn(
-						"DubboServiceMetadata can't be found in the Spring application [%s] and %s",
+						"DubboServiceMetadata can't be found in the Spring application [{}] and {}",
 						serviceName, requestMetadata);
 			}
 		}
@@ -609,7 +623,7 @@ public class DubboServiceMetadataRepository
 	}
 
 	protected void initSubscribedDubboMetadataService(String serviceName) {
-		discoveryClient.getInstances(serviceName).stream().findAny()
+		Optional.ofNullable(loadBalancerClient.choose(serviceName))
 				.map(this::getDubboMetadataServiceURLs)
 				.ifPresent(dubboMetadataServiceURLs -> {
 					dubboMetadataServiceURLs.forEach(dubboMetadataServiceURL -> {
@@ -638,6 +652,10 @@ public class DubboServiceMetadataRepository
 		String version = dubboMetadataServiceURL.getParameter(VERSION_KEY);
 		// Initialize DubboMetadataService with right version
 		dubboMetadataConfigServiceProxy.initProxy(serviceName, version);
+	}
+
+	public void removeServiceMetadata(String serviceName) {
+		dubboRestServiceMetadataRepository.remove(serviceName);
 	}
 
 	@Override
